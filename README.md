@@ -15,4 +15,41 @@ stateDiagram-v2
     search --> save 
     save --> write 
     write --> stop
+
+classDiagram
+    class Data{
+        <<Interface>>
+      +Type Source
+      +Type Friend
+      +Type Target
+      +Type Database
+      +stop_categorically() Bool
+      +get_data(ID, Database) Data
+      +stop_data(Source) Bool
+      +get_friends(Source) Iter~Friend~
+      +stop_friends(Iter~Friend~) Bool
+      +search(Source, Iter~Friend~) Iter~Target~
+      +save(Iter~Target~) Database
+      +write(Database) Location
+      +public() Bool
+      +priority(Integer)
+    }
+    class Handler {
+        <<Interface>>
+        +batch_size(Integer)
+        +batch_count(Integer)
+        +timeout(Integer)
+        +handled(List~Data~)
+    }
+    class Benchmark{
+        <<Interface>>
+        +example_hit(Source) Timing
+        +example_miss(Source) Timing
+        +example_near_miss(Source) Timing
+    }
+    class Web{
+        <<Interface>>
+        +count(Source)
+        +insert(Source)
+    }
 ```  
