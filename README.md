@@ -1,7 +1,7 @@
 # silkworm
 A library for append-only-database backed recursive search at scale
 
-
+```mermaid
 stateDiagram-v2
     [*] --> Abort_categorically?
     Abort_categorically? --> stop
@@ -15,4 +15,4 @@ stateDiagram-v2
     search --> save 
     save --> write 
     write --> stop
-            
+          ```  
