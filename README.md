@@ -15,7 +15,9 @@ stateDiagram-v2
     search --> save 
     save --> write 
     write --> stop
+```
 
+```mermaid
 classDiagram
     class Data{
         <<Interface>>
@@ -52,4 +54,4 @@ classDiagram
         +count(Source)
         +insert(Source)
     }
-```  
+```
