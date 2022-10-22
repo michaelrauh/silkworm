@@ -55,3 +55,14 @@ classDiagram
         +insert(Source)
     }
 ```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Data_in_both?
+    Data_in_both? --> stop
+    Data_in_both? --> friends_in_both?
+    friends_in_both? --> stop 
+    friends_in_both? --> data_and_friends_share_provenance?
+    data_and_friends_share_provenance? --> stop
+    data_and_friends_share_provenance? --> process
+```
