@@ -9,25 +9,34 @@ fn main() {
     println!("Hello from an example!");
 }
 
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 struct Node {
     _label: String
 }
 
-type Nodes = HashSet<Node>;
-type Edges = HashSet<(Node, Node)>;
-type NodesAndEdges = (Nodes, Edges);
-
-struct Holder {
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+struct Edge {
+    from: Node,
+    to: Node
 }
+
+#[derive(PartialEq, Eq, Serialize, Deserialize, Default)]
+struct GraphData {
+    nodes: HashSet<Node>,
+    edges: HashSet<Edge>,
+    input_files: HashSet<String>,
+    paths: HashSet<Vec<Edge>>
+}
+
+struct Holder{}
 
 impl Registry for Holder {
     
-    type Database = NodesAndEdges;
+    type Database = GraphData;
     type Location = File;
 
     fn create_db(&self) -> Self::Database {
-        (Nodes::default(), Edges::default())
+        GraphData::default()
     }
 
     fn worker_name(&self) -> String {

@@ -7,6 +7,10 @@ pub trait Registry {
     fn write_db(&self, loc: Self::Location, db: Self::Database) -> Result<(), anyhow::Error>;
 }
 
+pub trait DataCycle {
+    type Database;
+    fn stop_categorically(&self, db: Self::Database) -> bool;
+}
 
 fn life(reg: impl Registry) -> Result<(), anyhow::Error> {
     let name = reg.worker_name();
