@@ -1,2 +1,2 @@
 cargo test
-cargo test --example hello
+cargo test --example graph_walk
