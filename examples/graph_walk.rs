@@ -1,8 +1,10 @@
+use anyhow::Context;
 use beanstalkc::{Beanstalkc};
 use serde::{Deserialize, Serialize};
 use silkworm::{DataCycle, Registry};
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::Read;
 use std::process;
 use std::time::Duration;
 use std::{io::Write};
@@ -48,7 +50,7 @@ struct Holder {}
 
 impl Registry for Holder {
     type Database = GraphData;
-    type Location = File;
+    type Location = String;
     type GlobalQueueLocation = Beanstalkc;
     type DataRoute = DatabaseLocation;
     type JobReceipt = u64;
@@ -63,13 +65,16 @@ impl Registry for Holder {
     }
 
     fn db_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error> {
-        let res = File::create("database".to_owned() + &worker_name)?;
-        Ok(res)
+        let filename = "database".to_owned() + &worker_name;
+
+        Ok(filename)
     }
 
-    fn write_db(&self, mut loc: Self::Location, db: Self::Database) -> Result<(), anyhow::Error> {
+    fn write_db(&self, loc: Self::Location, db: Self::Database) -> Result<(), anyhow::Error> {
         let serialized = bincode::serialize(&db)?;
-        loc.write_all(&serialized)?;
+
+        let mut f = File::create(loc)?;
+        f.write_all(&serialized)?;
         Ok(())
     }
 
@@ -91,6 +96,7 @@ impl Registry for Holder {
 
     fn produce_global(&self, data: Self::DataRoute, mut queue: Self::GlobalQueueLocation, priority: usize) -> Result<Self::JobReceipt, anyhow::Error> {
         let to_put = bincode::serialize(&data)?;
+        queue.use_tube("jobs")?;
         let res = queue.put(&to_put, priority.try_into().unwrap(), Duration::from_secs(0), Duration::from_secs(10))?;
 
         Ok(res)
@@ -101,23 +107,58 @@ impl Registry for Holder {
         Ok(())
     }
 
-    fn nack_global(&self, mut queue: Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error> {
-        queue.bury_default(receipt)?;
-        queue.kick_job(receipt)?;
-
-        Ok(())
-    }
-
     fn create_local_queue(&self) -> Self::LocalQueue {
         vec![]
     }
 
-    fn consume_local(&self, mut queue: Self::LocalQueue) -> Self::DataRoute { // note there is no ack or nack for local as it consumes live and infallible
-        queue.pop().expect("should this method be optional?") // there is an issue here: framework should assume nonempty at this stage so the types should too
+    fn consume_local(&self, mut queue: Self::LocalQueue) -> Option<Self::DataRoute> {
+        queue.pop()
     }
 
     fn produce_local(&self, mut queue: Self::LocalQueue, loc: Self::DataRoute) {
         queue.push(loc)
+    }
+
+    fn produce_merge_event(&self, mut queue: Self::GlobalQueueLocation, loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error> {
+        let to_put = bincode::serialize(&loc)?;
+        queue.use_tube("merges")?;
+        let res = queue.put(&to_put, 0, Duration::from_secs(0), Duration::from_secs(100))?;
+
+        Ok(res)
+    }
+
+    fn consume_merge_event(&self, mut queue: Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::JobReceipt)>, anyhow::Error> {
+
+        let binding = queue.stats_tube("merges")?;
+        let count = binding.get("current-jobs-ready").context("cannot get current jobs ready")?;
+        if count == "0" {
+            return Ok(None)
+        }
+
+        queue.watch("merges")?;
+
+        let job = queue.reserve()?;
+        let ans = bincode::deserialize(job.body())?;
+        let reciept = job.id();
+        let tup = (ans, reciept);
+        let ans = Some(tup);
+        Ok(ans)
+    }
+
+    fn read_db(&self, loc: Self::Location) -> Result<Self::Database, anyhow::Error> {
+        let mut f = File::create(loc)?;
+        let mut buf = vec![];
+        f.read_to_end(&mut buf)?;
+        let deserialized = bincode::deserialize(&buf)?;
+
+        Ok(deserialized)
+    }
+
+    fn collapse_dbs(&self, mut db: Self::Database, other: Self::Database) {
+        db.nodes.extend(other.nodes.into_iter());
+        db.edges.extend(other.edges.into_iter());
+        db.input_files.extend(other.input_files.into_iter());
+        db.paths.extend(other.paths.into_iter());
     }
     
 }
