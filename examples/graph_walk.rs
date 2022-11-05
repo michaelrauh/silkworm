@@ -32,7 +32,7 @@ struct GraphData {
     paths: HashMap<i64, Vec<Edge>>,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
 struct DatabaseLocation {
     data_type: String,
     hash: i64
@@ -119,15 +119,15 @@ impl Registry for Holder {
         queue.push(loc)
     }
 
-    fn produce_merge_event(&self, mut queue: Self::GlobalQueueLocation, loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error> {
-        let to_put = bincode::serialize(&loc)?;
+    fn produce_merge_event(&self, mut queue: Self::GlobalQueueLocation, db_loc: Self::Location, queue_loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error> {
+        let to_put = bincode::serialize(&(db_loc, queue_loc))?;
         queue.use_tube("merges")?;
         let res = queue.put(&to_put, 0, Duration::from_secs(0), Duration::from_secs(100))?;
 
         Ok(res)
     }
 
-    fn consume_merge_event(&self, mut queue: Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::JobReceipt)>, anyhow::Error> {
+    fn consume_merge_event(&self, mut queue: Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::Location, Self::JobReceipt)>, anyhow::Error> {
 
         let binding = queue.stats_tube("merges")?;
         let count = binding.get("current-jobs-ready").context("cannot get current jobs ready")?;
@@ -138,14 +138,23 @@ impl Registry for Holder {
         queue.watch("merges")?;
 
         let job = queue.reserve()?;
-        let ans = bincode::deserialize(job.body())?;
+        let (db, queue) = bincode::deserialize(job.body())?;
         let reciept = job.id();
-        let tup = (ans, reciept);
+        let tup = (db, queue, reciept);
         let ans = Some(tup);
         Ok(ans)
     }
 
     fn read_db(&self, loc: Self::Location) -> Result<Self::Database, anyhow::Error> {
+        let mut f = File::create(loc)?;
+        let mut buf = vec![];
+        f.read_to_end(&mut buf)?;
+        let deserialized = bincode::deserialize(&buf)?;
+
+        Ok(deserialized)
+    }
+
+    fn read_queue(&self, loc: Self::Location) -> Result<Self::Database, anyhow::Error> {
         let mut f = File::create(loc)?;
         let mut buf = vec![];
         f.read_to_end(&mut buf)?;
@@ -160,7 +169,20 @@ impl Registry for Holder {
         db.input_files.extend(other.input_files.into_iter());
         db.paths.extend(other.paths.into_iter());
     }
-    
+
+    fn queue_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error> {
+        let filename = "queue".to_owned() + &worker_name;
+
+        Ok(filename)
+    }
+
+    fn write_local_queue(&self, loc: Self::Location, queue: Self::LocalQueue) -> Result<(), anyhow::Error> {
+        let serialized = bincode::serialize(&queue)?;
+
+        let mut f = File::create(loc)?;
+        f.write_all(&serialized)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
