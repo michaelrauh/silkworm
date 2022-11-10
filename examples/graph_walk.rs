@@ -70,14 +70,6 @@ impl Registry for Holder {
         Ok(filename)
     }
 
-    fn write_db(&self, loc: Self::Location, db: Self::Database) -> Result<(), anyhow::Error> {
-        let serialized = bincode::serialize(&db)?;
-
-        let mut f = File::create(loc)?;
-        f.write_all(&serialized)?;
-        Ok(())
-    }
-
     fn create_global_queue(&self) -> Result<Self::GlobalQueueLocation, anyhow::Error> {
         let conn = Beanstalkc::new()
             .connect()?;
@@ -102,11 +94,6 @@ impl Registry for Holder {
         Ok(res)
     }
 
-    fn ack_global(&self, mut queue: Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error> {
-        let _res = queue.delete(receipt)?;
-        Ok(())
-    }
-
     fn create_local_queue(&self) -> Self::LocalQueue {
         vec![]
     }
@@ -119,56 +106,6 @@ impl Registry for Holder {
         queue.push(loc)
     }
 
-    fn produce_merge_event(&self, mut queue: Self::GlobalQueueLocation, db_loc: Self::Location, queue_loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error> {
-        let to_put = bincode::serialize(&(db_loc, queue_loc))?;
-        queue.use_tube("merges")?;
-        let res = queue.put(&to_put, 0, Duration::from_secs(0), Duration::from_secs(100))?;
-
-        Ok(res)
-    }
-
-    fn consume_merge_event(&self, mut queue: Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::Location, Self::JobReceipt)>, anyhow::Error> {
-
-        let binding = queue.stats_tube("merges")?;
-        let count = binding.get("current-jobs-ready").context("cannot get current jobs ready")?;
-        if count == "0" {
-            return Ok(None)
-        }
-
-        queue.watch("merges")?;
-
-        let job = queue.reserve()?;
-        let (db, queue) = bincode::deserialize(job.body())?;
-        let reciept = job.id();
-        let tup = (db, queue, reciept);
-        let ans = Some(tup);
-        Ok(ans)
-    }
-
-    fn read_db(&self, loc: Self::Location) -> Result<Self::Database, anyhow::Error> {
-        let mut f = File::create(loc)?;
-        let mut buf = vec![];
-        f.read_to_end(&mut buf)?;
-        let deserialized = bincode::deserialize(&buf)?;
-
-        Ok(deserialized)
-    }
-
-    fn read_queue(&self, loc: Self::Location) -> Result<Self::Database, anyhow::Error> {
-        let mut f = File::create(loc)?;
-        let mut buf = vec![];
-        f.read_to_end(&mut buf)?;
-        let deserialized = bincode::deserialize(&buf)?;
-
-        Ok(deserialized)
-    }
-
-    fn collapse_dbs(&self, mut db: Self::Database, other: Self::Database) {
-        db.nodes.extend(other.nodes.into_iter());
-        db.edges.extend(other.edges.into_iter());
-        db.input_files.extend(other.input_files.into_iter());
-        db.paths.extend(other.paths.into_iter());
-    }
 
     fn queue_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error> {
         let filename = "queue".to_owned() + &worker_name;
@@ -181,6 +118,74 @@ impl Registry for Holder {
 
         let mut f = File::create(loc)?;
         f.write_all(&serialized)?;
+        Ok(())
+    }
+
+    fn write_db(&self, loc: &Self::Location, db: &mut Self::Database) -> Result<(), anyhow::Error> {
+            let serialized = bincode::serialize(&db)?;
+    
+            let mut f = File::create(loc)?;
+            f.write_all(&serialized)?;
+            Ok(())
+    }
+    
+    fn read_queue(&self, loc: &Self::Location) -> Result<Self::LocalQueue, anyhow::Error> {
+        let mut f = File::create(loc)?;
+        let mut buf = vec![];
+        f.read_to_end(&mut buf)?;
+        let deserialized = bincode::deserialize(&buf)?;
+
+        Ok(deserialized)
+    }
+
+    fn read_db(&self, loc: &Self::Location) -> Result<Self::Database, anyhow::Error> {
+        let mut f = File::create(loc)?;
+        let mut buf = vec![];
+        f.read_to_end(&mut buf)?;
+        let deserialized = bincode::deserialize(&buf)?;
+
+        Ok(deserialized)
+    }
+
+    fn consume_merge_event(&self, queue: &mut Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::Location, Self::JobReceipt, Self::Location, Self::Location, Self::JobReceipt)>, anyhow::Error> {
+        let binding = queue.stats_tube("merges")?;
+        let count = binding.get("current-jobs-ready").context("cannot get current jobs ready")?;
+        if count == "0" || count == "1" {
+            return Ok(None)
+        }
+
+        queue.watch("merges")?;
+
+        let first_job = queue.reserve()?;
+        let (first_db, first_queue) = bincode::deserialize(first_job.body())?;
+        let first_receipt = first_job.id();
+
+        let second_job = queue.reserve()?;
+        let (second_db, second_queue) = bincode::deserialize(second_job.body())?;
+        let second_receipt = second_job.id();
+
+        let tup = (first_db, first_queue, first_receipt, second_db, second_queue, second_receipt);
+        let ans = Some(tup);
+        Ok(ans)
+    }
+
+    fn produce_merge_event(&self, queue: &mut Self::GlobalQueueLocation, first_db_loc: Self::Location, first_queue_loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error> {
+        let to_put = bincode::serialize(&(first_db_loc, first_queue_loc))?;
+            queue.use_tube("merges")?;
+            let res = queue.put(&to_put, 0, Duration::from_secs(0), Duration::from_secs(100))?;
+    
+            Ok(res)
+    }
+
+    fn collapse_dbs(&self, db: &mut Self::Database, other: Self::Database) {
+        db.nodes.extend(other.nodes.into_iter());
+            db.edges.extend(other.edges.into_iter());
+            db.input_files.extend(other.input_files.into_iter());
+            db.paths.extend(other.paths.into_iter());
+    }
+
+    fn ack_global(&self, queue: &mut Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error> {
+        let _res = queue.delete(receipt)?;
         Ok(())
     }
 }
