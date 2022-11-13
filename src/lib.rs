@@ -17,7 +17,7 @@ pub trait Registry {
     fn produce_global(&self, data: Self::DataRoute, queue: Self::GlobalQueueLocation, priority: usize) -> Result<Self::JobReceipt, anyhow::Error>;
     fn ack_global(&self, queue: &mut Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error>;
     fn create_local_queue(&self) -> Self::LocalQueue;
-    fn consume_local(&self, queue: Self::LocalQueue) -> Option<Self::DataRoute>;
+    fn consume_local(&self, queue: &mut Self::LocalQueue) -> Option<Self::DataRoute>;
     fn produce_local(&self, queue: Self::LocalQueue, loc: Self::DataRoute);
     fn produce_merge_event(&self, queue: &mut Self::GlobalQueueLocation, first_db_loc: Self::Location, first_queue_loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error>;
     fn consume_merge_event(&self, queue: &mut Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::Location, Self::JobReceipt, Self::Location, Self::Location, Self::JobReceipt)>, anyhow::Error>;
@@ -36,24 +36,35 @@ pub trait DataCycle {
 fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::Error> {
 
     let mut merge_queue = reg.create_global_queue()?;
-    let merge_event = reg.consume_merge_event(&mut merge_queue)?;
     let mut global_queue = reg.create_global_queue()?;
 
-    if merge_event.is_some() {
-        let (first_db_loc, first_queue_loc, first_merge_rec, second_db_loc, second_queue_loc, second_merge_rec) = merge_event.unwrap();
+    if let Some(merge_event) =  reg.consume_merge_event(&mut merge_queue)? {
+        let (first_db_loc, first_queue_loc, first_merge_rec, second_db_loc, second_queue_loc, second_merge_rec) = merge_event;
         
         let mut first_db = reg.read_db(&first_db_loc)?;
-        let first_queue = reg.read_queue(&first_queue_loc)?;
+        let mut first_queue = reg.read_queue(&first_queue_loc)?;
 
         let second_db = reg.read_db(&second_db_loc)?;
         let second_queue = reg.read_queue(&second_queue_loc)?;
 
         reg.collapse_dbs(&mut first_db, second_db);
+
+
+        while let Some(data_route) = reg.consume_local(&mut first_queue) {
+            // call a function on reg that fetches the right datacycle for that dataroute. get friends from there.
+            // if data is on both sides, stop.
+            // if friends are on both sides, stop.
+            // if data and friends are all on the same side, stop
+            // else play the whole data cycle
+        }
+
+
         // replay first queue
         // replay second queue and add queue events to first queue
 
         reg.write_db(&first_db_loc, &mut first_db)?;
         // safely delete other db
+        // call compact queue to reorder or delete queue items
         // write first queue
         reg.produce_merge_event(&mut global_queue, first_db_loc, first_queue_loc)?;
         reg.ack_global(&mut merge_queue, first_merge_rec)?;

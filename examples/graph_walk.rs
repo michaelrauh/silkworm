@@ -98,7 +98,7 @@ impl Registry for Holder {
         vec![]
     }
 
-    fn consume_local(&self, mut queue: Self::LocalQueue) -> Option<Self::DataRoute> {
+    fn consume_local(&self, queue: &mut Self::LocalQueue) -> Option<Self::DataRoute> {
         queue.pop()
     }
 
