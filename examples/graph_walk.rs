@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::process;
 use std::time::Duration;
-use std::{io::Write};
+use std::io::Write;
 
 fn main() {
     println!("Hello from an example!");
@@ -15,6 +15,16 @@ fn main() {
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 struct Node {
+    _label: String,
+}
+
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+struct InputFile {
+    _label: String,
+}
+
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+struct GraphPath {
     _label: String,
 }
 
@@ -43,6 +53,30 @@ impl DataCycle for Node {
 
     fn stop_categorically(&self, db: Self::Database) -> bool {
         !db.edges.is_empty()
+    }
+}
+
+impl DataCycle for Edge {
+    type Database = GraphData;
+
+    fn stop_categorically(&self, db: Self::Database) -> bool {
+        todo!()
+    }
+}
+
+impl DataCycle for InputFile {
+    type Database = GraphData;
+
+    fn stop_categorically(&self, db: Self::Database) -> bool {
+        todo!()
+    }
+}
+
+impl DataCycle for GraphPath {
+    type Database = GraphData;
+
+    fn stop_categorically(&self, db: Self::Database) -> bool {
+        todo!()
     }
 }
 
@@ -187,6 +221,21 @@ impl Registry for Holder {
     fn ack_global(&self, queue: &mut Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error> {
         let _res = queue.delete(receipt)?;
         Ok(())
+    }
+
+    fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database>> {
+        if route.data_type == "nodes" { // todo these have to be written at some point to be read
+            return Box::new(Node::default())
+        }
+        if route.data_type == "edges" {
+            return Box::new(Edge::default())
+        }
+        if route.data_type == "input_files" {
+            return Box::new(InputFile::default())
+        }
+        else { // route.data_type == "paths" {
+            Box::new(GraphPath::default())
+        }
     }
 }
 

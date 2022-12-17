@@ -24,6 +24,7 @@ pub trait Registry {
     fn collapse_dbs(&self, db: &mut Self::Database, other: Self::Database);
     fn queue_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error>;
     fn write_local_queue(&self, loc: Self::Location, queue: Self::LocalQueue) -> Result<(), anyhow::Error>;
+    fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database>>;
     // add a reorder local queue and a reorder frequency or trigger
     // add some concept of queue cleanup or event collapse
 }
@@ -51,7 +52,8 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
 
 
         while let Some(data_route) = reg.consume_local(&mut first_queue) {
-            // call a function on reg that fetches the right datacycle for that dataroute. get friends from there.
+            let cycle = reg.get_data_cycle(data_route);
+            // get friends off of cycle for that data route
             // if data is on both sides, stop.
             // if friends are on both sides, stop.
             // if data and friends are all on the same side, stop
