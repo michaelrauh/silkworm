@@ -2,9 +2,10 @@ pub trait Registry {
     type Database;
     type Location;
     type GlobalQueueLocation;
-    type DataRoute;
+    type DataRoute: Clone;
     type JobReceipt;
     type LocalQueue: Clone;
+    type Data;
 
     fn worker_name(&self) -> String;
     fn create_db(&self) -> Self::Database;
@@ -24,14 +25,18 @@ pub trait Registry {
     fn collapse_dbs(&self, db: &mut Self::Database, other: Self::Database);
     fn queue_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error>;
     fn write_local_queue(&self, loc: Self::Location, queue: Self::LocalQueue) -> Result<(), anyhow::Error>;
-    fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database>>;
+    fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
     // add a reorder local queue and a reorder frequency or trigger
     // add some concept of queue cleanup or event collapse
 }
 
 pub trait DataCycle {
     type Database;
+    type DataRoute;
+    type Data;
+
     fn stop_categorically(&self, db: Self::Database) -> bool;
+    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data>;
 }
 
 fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::Error> {
@@ -52,7 +57,8 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
 
 
         while let Some(data_route) = reg.consume_local(&mut first_queue) {
-            let cycle = reg.get_data_cycle(data_route);
+            let cycle = reg.get_data_cycle(data_route.clone());
+            let first_data_option = cycle.get_data(&first_db, data_route);
             // get friends off of cycle for that data route
             // if data is on both sides, stop.
             // if friends are on both sides, stop.
@@ -60,11 +66,11 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
             // else play the whole data cycle
         }
 
-
+        // rebuild the queue
         // replay first queue
         // replay second queue and add queue events to first queue
 
-        reg.write_db(&first_db_loc, &mut first_db)?;
+        // reg.write_db(&first_db_loc, &mut first_db)?;
         // safely delete other db
         // call compact queue to reorder or delete queue items
         // write first queue

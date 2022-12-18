@@ -13,33 +13,37 @@ fn main() {
     println!("Hello from an example!");
 }
 
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct Node {
     _label: String,
 }
 
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct InputFile {
     _label: String,
 }
 
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct GraphPath {
     _label: String,
 }
 
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct Edge {
     from: Node,
     to: Node,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
 struct GraphData {
-    nodes: HashMap<i64, Node>,
+    nodes: HashMap<i64, Node>, // todo pull in im crate
     edges: HashMap<i64, Edge>,
-    input_files: HashMap<i64, String>,
-    paths: HashMap<i64, Vec<Edge>>,
+    input_files: HashMap<i64, InputFile>,
+    paths: HashMap<i64, GraphPath>,
+}
+
+enum Data {
+    Node(Node), Edge(Edge), InputFile(InputFile), GraphPath(GraphPath)
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
@@ -50,33 +54,61 @@ struct DatabaseLocation {
 
 impl DataCycle for Node {
     type Database = GraphData;
+    type DataRoute = DatabaseLocation;
+    type Data = Data;
 
     fn stop_categorically(&self, db: Self::Database) -> bool {
-        !db.edges.is_empty()
+        db.edges.is_empty()
+    }
+
+    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+        let node = db.nodes.get(&route.hash)?;
+        Some(Data::Node(node.to_owned()))
     }
 }
 
 impl DataCycle for Edge {
     type Database = GraphData;
+    type DataRoute = DatabaseLocation;
+    type Data = Data;
 
     fn stop_categorically(&self, db: Self::Database) -> bool {
-        todo!()
+        db.nodes.is_empty()
+    }
+
+    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+        let edge = db.edges.get(&route.hash)?;
+        Some(Data::Edge(edge.to_owned()))
     }
 }
 
 impl DataCycle for InputFile {
     type Database = GraphData;
+    type DataRoute = DatabaseLocation;
+    type Data = Data;
 
-    fn stop_categorically(&self, db: Self::Database) -> bool {
-        todo!()
+    fn stop_categorically(&self, _db: Self::Database) -> bool {
+        false
+    }
+
+    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+        let input_file = db.input_files.get(&route.hash)?;
+        Some(Data::InputFile(input_file.to_owned()))
     }
 }
 
 impl DataCycle for GraphPath {
     type Database = GraphData;
+    type DataRoute = DatabaseLocation;
+    type Data = Data;
 
     fn stop_categorically(&self, db: Self::Database) -> bool {
-        todo!()
+        db.nodes.is_empty() || db.edges.is_empty()
+    }
+
+    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+        let graph_path = db.paths.get(&route.hash)?;
+        Some(Data::GraphPath(graph_path.to_owned()))
     }
 }
 
@@ -89,6 +121,7 @@ impl Registry for Holder {
     type DataRoute = DatabaseLocation;
     type JobReceipt = u64;
     type LocalQueue = Vec<DatabaseLocation>;
+    type Data = Data;
 
     fn create_db(&self) -> Self::Database {
         GraphData::default()
@@ -223,7 +256,7 @@ impl Registry for Holder {
         Ok(())
     }
 
-    fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database>> {
+    fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>> {
         if route.data_type == "nodes" { // todo these have to be written at some point to be read
             return Box::new(Node::default())
         }
