@@ -22,7 +22,7 @@ pub trait Registry {
     fn produce_local(&self, queue: Self::LocalQueue, loc: Self::DataRoute);
     fn produce_merge_event(&self, queue: &mut Self::GlobalQueueLocation, first_db_loc: Self::Location, first_queue_loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error>;
     fn consume_merge_event(&self, queue: &mut Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::Location, Self::JobReceipt, Self::Location, Self::Location, Self::JobReceipt)>, anyhow::Error>;
-    fn collapse_dbs(&self, db: &mut Self::Database, other: Self::Database);
+    fn collapse_dbs(&self, db: &Self::Database, other: &Self::Database) -> Self::Database;
     fn queue_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error>;
     fn write_local_queue(&self, loc: Self::Location, queue: Self::LocalQueue) -> Result<(), anyhow::Error>;
     fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
@@ -36,7 +36,8 @@ pub trait DataCycle {
     type Data;
 
     fn stop_categorically(&self, db: Self::Database) -> bool;
-    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data>;
+    fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data>;
+    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data>; // todo convert this to an iterator
 }
 
 fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::Error> {
@@ -53,20 +54,28 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
         let second_db = reg.read_db(&second_db_loc)?;
         let second_queue = reg.read_queue(&second_queue_loc)?;
 
-        reg.collapse_dbs(&mut first_db, second_db);
-
+        reg.collapse_dbs(&mut first_db, &second_db);
 
         while let Some(data_route) = reg.consume_local(&mut first_queue) {
             let cycle = reg.get_data_cycle(data_route.clone());
-            let first_data_option = cycle.get_data(&first_db, data_route);
-            // get friends off of cycle for that data route
-            // if data is on both sides, stop.
-            // if friends are on both sides, stop.
+            let first_data_option = cycle.get_data(&first_db, &data_route);
+            let second_data_option = cycle.get_data(&second_db, &data_route);
+
+            
+            if first_data_option.is_some() && second_data_option.is_some() {
+                break; // don't drop the queue member
+            }
+
+            let first_friends = cycle.get_friends(&first_db, &data_route);
+            let second_friends = cycle.get_friends(&second_db, &data_route);
+
+            if !first_friends.is_empty() && !second_friends.is_empty() {
+                break;
+            }
             // if data and friends are all on the same side, stop
             // else play the whole data cycle
         }
 
-        // rebuild the queue
         // replay first queue
         // replay second queue and add queue events to first queue
 
@@ -74,7 +83,7 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
         // safely delete other db
         // call compact queue to reorder or delete queue items
         // write first queue
-        reg.produce_merge_event(&mut global_queue, first_db_loc, first_queue_loc)?;
+        reg.produce_merge_event(&mut global_queue, first_db_loc, first_queue_loc)?; // make sure the queue is intact here
         reg.ack_global(&mut merge_queue, first_merge_rec)?;
         reg.ack_global(&mut merge_queue, second_merge_rec)?;
 

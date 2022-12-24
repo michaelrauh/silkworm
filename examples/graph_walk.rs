@@ -5,9 +5,10 @@ use silkworm::{DataCycle, Registry};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::process;
+use std::{process, vec};
 use std::time::Duration;
 use std::io::Write;
+use itertools::Itertools;
 
 fn main() {
     println!("Hello from an example!");
@@ -26,6 +27,7 @@ struct InputFile {
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct GraphPath {
     _label: String,
+    edges: Vec<Edge>
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
@@ -42,6 +44,7 @@ struct GraphData {
     paths: HashMap<i64, GraphPath>,
 }
 
+#[derive(PartialEq)]
 enum Data {
     Node(Node), Edge(Edge), InputFile(InputFile), GraphPath(GraphPath)
 }
@@ -61,9 +64,16 @@ impl DataCycle for Node {
         db.edges.is_empty()
     }
 
-    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+    fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
         let node = db.nodes.get(&route.hash)?;
         Some(Data::Node(node.to_owned()))
+    }
+
+    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> { // todo make this less cloney
+        let data = self.get_data(db, route).expect("Do not get friends of nonexistent data");
+        let edges = db.edges.iter().filter(|(_, inner_edge)| Data::Node(inner_edge.from.clone()) == data || Data::Node(inner_edge.to.clone()) == data).map(|(_, edge)| Data::Edge(edge.clone()));
+        let paths = db.paths.iter().filter(|(_, graph_path)| graph_path.edges.iter().any(|inner_edge| Data::Node(inner_edge.from.clone()) == data || Data::Node(inner_edge.to.clone()) == data)).map(|(_, graph_path)| Data::GraphPath(graph_path.clone()));
+        edges.chain(paths).collect_vec()
     }
 }
 
@@ -76,9 +86,21 @@ impl DataCycle for Edge {
         db.nodes.is_empty()
     }
 
-    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+    fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
         let edge = db.edges.get(&route.hash)?;
         Some(Data::Edge(edge.to_owned()))
+    }
+
+    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
+        let data = self.get_data(db, route).expect("Do not get friends of nonexistent data");
+        if let Data::Edge(edge) = data {
+            let nodes = db.nodes.iter().filter(|(_, node)| node.clone().clone() == edge.from || node.clone().clone() == edge.to).map(|(_, node)| Data::Node(node.clone()));
+            let paths = db.paths.iter().filter(|(_, graph_path)| graph_path.edges.iter().any(|inner_edge| inner_edge.clone() == edge)).map(|(_, graph_path)| Data::GraphPath(graph_path.clone()));
+            nodes.chain(paths).collect_vec()
+        } else {
+            panic!("edge handler is handling a non edge")
+        }
+        
     }
 }
 
@@ -91,9 +113,13 @@ impl DataCycle for InputFile {
         false
     }
 
-    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+    fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
         let input_file = db.input_files.get(&route.hash)?;
         Some(Data::InputFile(input_file.to_owned()))
+    }
+
+    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
+        vec![]
     }
 }
 
@@ -106,9 +132,21 @@ impl DataCycle for GraphPath {
         db.nodes.is_empty() || db.edges.is_empty()
     }
 
-    fn get_data(&self, db: &Self::Database, route: Self::DataRoute) -> Option<Self::Data> {
+    fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
         let graph_path = db.paths.get(&route.hash)?;
         Some(Data::GraphPath(graph_path.to_owned()))
+    }
+
+    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
+        let data = self.get_data(db, route).expect("Do not get friends of nonexistent data");
+
+        if let Data::GraphPath(graph_path) = data {
+        let nodes = db.nodes.iter().filter(|(_, node)| graph_path.edges.iter().any(|edge| edge.from == node.clone().clone() || edge.to == node.clone().clone() )).map(|(_, node)| Data::Node(node.clone()));
+        let edges = db.edges.iter().filter(|(_, edge)| graph_path.edges.iter().any(|inner_edge| inner_edge == edge.clone())).map(|(_, edge)| Data::Edge(edge.clone()));
+        nodes.chain(edges).collect_vec()
+        } else {
+            panic!("path handler is handling a non edge")
+        }
     }
 }
 
@@ -244,11 +282,13 @@ impl Registry for Holder {
             Ok(res)
     }
 
-    fn collapse_dbs(&self, db: &mut Self::Database, other: Self::Database) {
-        db.nodes.extend(other.nodes.into_iter());
-            db.edges.extend(other.edges.into_iter());
-            db.input_files.extend(other.input_files.into_iter());
-            db.paths.extend(other.paths.into_iter());
+    fn collapse_dbs(&self, db: &Self::Database, other: &Self::Database) -> Self::Database { // todo make this less cloney
+        let nodes = db.nodes.iter().chain(other.nodes.iter()).map(|(x, y)| (x.clone(), y.clone())).collect();
+        let edges = db.edges.iter().chain(other.edges.iter()).map(|(x, y)| (x.clone(), y.clone())).collect();
+        let input_files = db.input_files.iter().chain(other.input_files.iter()).map(|(x, y)| (x.clone(), y.clone())).collect();
+        let paths = db.paths.iter().chain(other.paths.iter()).map(|(x, y)| (x.clone(), y.clone())).collect();
+
+        GraphData{ nodes, edges, input_files, paths }
     }
 
     fn ack_global(&self, queue: &mut Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error> {
