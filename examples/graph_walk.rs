@@ -1,5 +1,6 @@
 use anyhow::Context;
 use beanstalkc::{Beanstalkc};
+use random_string::generate;
 use serde::{Deserialize, Serialize};
 use silkworm::{DataCycle, Registry};
 use std::collections::HashMap;
@@ -169,8 +170,8 @@ impl Registry for Holder {
         process::id().to_string()
     }
 
-    fn db_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error> {
-        let filename = "database".to_owned() + &worker_name;
+    fn db_location(&self, worker_name: String, random_string: String) -> Result<Self::Location, anyhow::Error> {
+        let filename = "database".to_owned() + &worker_name + &random_string;
 
         Ok(filename)
     }
@@ -212,13 +213,13 @@ impl Registry for Holder {
     }
 
 
-    fn queue_location(&self, worker_name: String) -> Result<Self::Location, anyhow::Error> {
-        let filename = "queue".to_owned() + &worker_name;
+    fn queue_location(&self, worker_name: String, unique_string: String) -> Result<Self::Location, anyhow::Error> {
+        let filename = "queue".to_owned() + &worker_name + &unique_string;
 
         Ok(filename)
     }
 
-    fn write_local_queue(&self, loc: Self::Location, queue: Self::LocalQueue) -> Result<(), anyhow::Error> {
+    fn write_local_queue(&self, loc: &Self::Location, queue: &Self::LocalQueue) -> Result<(), anyhow::Error> {
         let serialized = bincode::serialize(&queue)?;
 
         let mut f = File::create(loc)?;
@@ -226,7 +227,7 @@ impl Registry for Holder {
         Ok(())
     }
 
-    fn write_db(&self, loc: &Self::Location, db: &mut Self::Database) -> Result<(), anyhow::Error> {
+    fn write_db(&self, loc: &Self::Location, db: &Self::Database) -> Result<(), anyhow::Error> {
             let serialized = bincode::serialize(&db)?;
     
             let mut f = File::create(loc)?;
@@ -309,6 +310,11 @@ impl Registry for Holder {
         else { // route.data_type == "paths" {
             Box::new(GraphPath::default())
         }
+    }
+
+    fn unique_string(&self) -> String {
+        let charset = "abcdefghijklmnopqrstuvwxyz";
+        generate(10, charset)
     }
 }
 
