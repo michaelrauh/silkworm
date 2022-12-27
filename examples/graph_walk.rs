@@ -39,7 +39,7 @@ struct Edge {
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
 struct GraphData {
-    nodes: HashMap<i64, Node>, // todo pull in im crate
+    nodes: HashMap<i64, Node>, // todo pull in im crate or use an ECS
     edges: HashMap<i64, Edge>,
     input_files: HashMap<i64, InputFile>,
     paths: HashMap<i64, GraphPath>,
@@ -208,7 +208,7 @@ impl Registry for Holder {
         queue.pop()
     }
 
-    fn produce_local(&self, mut queue: Self::LocalQueue, loc: Self::DataRoute) {
+    fn produce_local(&self, mut queue: &mut Vec<DatabaseLocation>, loc: Self::DataRoute) {
         queue.push(loc)
     }
 
@@ -298,7 +298,7 @@ impl Registry for Holder {
     }
 
     fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>> {
-        if route.data_type == "nodes" { // todo these have to be written at some point to be read
+        if route.data_type == "nodes" {
             return Box::new(Node::default())
         }
         if route.data_type == "edges" {

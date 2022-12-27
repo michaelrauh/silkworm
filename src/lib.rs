@@ -20,15 +20,13 @@ pub trait Registry {
     fn ack_global(&self, queue: &mut Self::GlobalQueueLocation, receipt: Self::JobReceipt) -> Result<(), anyhow::Error>;
     fn create_local_queue(&self) -> Self::LocalQueue;
     fn consume_local(&self, queue: &mut Self::LocalQueue) -> Option<Self::DataRoute>;
-    fn produce_local(&self, queue: Self::LocalQueue, loc: Self::DataRoute);
+    fn produce_local(&self, queue: &mut Self::LocalQueue, loc: Self::DataRoute);
     fn produce_merge_event(&self, queue: &mut Self::GlobalQueueLocation, first_db_loc: Self::Location, first_queue_loc: Self::Location) -> Result<Self::JobReceipt, anyhow::Error>;
     fn consume_merge_event(&self, queue: &mut Self::GlobalQueueLocation) -> Result<Option<(Self::Location, Self::Location, Self::JobReceipt, Self::Location, Self::Location, Self::JobReceipt)>, anyhow::Error>;
     fn collapse_dbs(&self, db: &Self::Database, other: &Self::Database) -> Self::Database;
     fn queue_location(&self, worker_name: String, random_string: String) -> Result<Self::Location, anyhow::Error>;
     fn write_local_queue(&self, loc: &Self::Location, queue: &Self::LocalQueue) -> Result<(), anyhow::Error>;
     fn get_data_cycle(&self, route: Self::DataRoute) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
-    // add a reorder local queue and a reorder frequency or trigger
-    // add some concept of queue cleanup or event collapse
 }
 
 pub trait DataCycle {
@@ -38,7 +36,7 @@ pub trait DataCycle {
 
     fn stop_categorically(&self, db: Self::Database) -> bool;
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data>;
-    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data>; // todo convert this to an iterator
+    fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data>;
 }
 
 fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::Error> {
@@ -52,13 +50,13 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
         let mut first_queue = reg.read_queue(&first_queue_loc)?;
 
         let second_db = reg.read_db(&second_db_loc)?;
-        let second_queue = reg.read_queue(&second_queue_loc)?;
+        let mut second_queue = reg.read_queue(&second_queue_loc)?;
 
         let new_db_loc = reg.db_location(reg.worker_name(), reg.unique_string())?;
         let new_db = reg.collapse_dbs(&first_db, &second_db);
 
         let new_queue_loc = reg.queue_location(reg.worker_name(), reg.unique_string())?;
-        let new_queue = reg.create_local_queue();
+        let mut new_queue = reg.create_local_queue();
 
         while let Some(data_route) = reg.consume_local(&mut first_queue) {
             let cycle = reg.get_data_cycle(data_route.clone());
@@ -66,24 +64,55 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
             let second_data_option = cycle.get_data(&second_db, &data_route);
 
             if first_data_option.is_some() && second_data_option.is_some() {
-                continue; // todo don't drop the queue member - add it to new_queue
+                reg.produce_local(&mut new_queue, data_route);
+                continue;
             }
 
             let first_friends = cycle.get_friends(&first_db, &data_route);
             let second_friends = cycle.get_friends(&second_db, &data_route);
 
             if !first_friends.is_empty() && !second_friends.is_empty() {
-                continue; // todo don't drop the queue member - add it to new_queue
+                reg.produce_local(&mut new_queue, data_route);
+                continue;
             }
 
             if (first_data_option.is_some() && second_data_option.is_none() && !first_friends.is_empty() && second_friends.is_empty()) || (first_data_option.is_none() && second_data_option.is_some() && first_friends.is_empty() && !second_friends.is_empty()) {
-                continue; // todo don't drop the queue member - add it to new_queue
+                reg.produce_local(&mut new_queue, data_route);
+                continue;
             }
 
-            // todo play the whole data cycle but don't drop the queue member against new_db
+            // todo play the whole data cycle on first_queue
+            reg.produce_local(&mut new_queue, data_route);
         }
 
-        // consume local on second queue and repeat above
+
+        while let Some(data_route) = reg.consume_local(&mut second_queue) {
+            let cycle = reg.get_data_cycle(data_route.clone());
+            let first_data_option = cycle.get_data(&first_db, &data_route);
+            let second_data_option = cycle.get_data(&second_db, &data_route);
+
+            if first_data_option.is_some() && second_data_option.is_some() {
+                reg.produce_local(&mut new_queue, data_route);
+                continue;
+            }
+
+            let first_friends = cycle.get_friends(&first_db, &data_route);
+            let second_friends = cycle.get_friends(&second_db, &data_route);
+
+            if !first_friends.is_empty() && !second_friends.is_empty() {
+                reg.produce_local(&mut new_queue, data_route);
+                continue;
+            }
+
+            if (first_data_option.is_some() && second_data_option.is_none() && !first_friends.is_empty() && second_friends.is_empty()) || (first_data_option.is_none() && second_data_option.is_some() && first_friends.is_empty() && !second_friends.is_empty()) {
+                reg.produce_local(&mut new_queue, data_route);
+                continue;
+            }
+
+            // todo play the whole data cycle on second_queue
+            reg.produce_local(&mut new_queue, data_route);
+        }
+
 
         reg.write_db(&new_db_loc, &new_db)?;
         reg.write_local_queue(&new_queue_loc, &new_queue)?;
@@ -106,9 +135,9 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
 
     let (data_route, receipt) = reg.consume_global(global_queue)?; // consume batch size events and repeat batch count times until timeout
 
-    let local_queue = reg.create_local_queue();
+    let mut local_queue = reg.create_local_queue();
     let queue_to_write = local_queue.clone();
-    reg.produce_local(local_queue, data_route);
+    reg.produce_local(&mut local_queue, data_route);
 
     // find the right datacycle and run it for the data route
     // let (db_update, global_events) = cycle_data(db, worker, local_queue);
