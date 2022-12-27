@@ -1,10 +1,10 @@
-use anyhow::Context;
+use anyhow::{Context, Ok};
 use beanstalkc::{Beanstalkc};
 use random_string::generate;
 use serde::{Deserialize, Serialize};
 use silkworm::{DataCycle, Registry};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, self};
 use std::io::Read;
 use std::{process, vec};
 use std::time::Duration;
@@ -315,6 +315,11 @@ impl Registry for Holder {
     fn unique_string(&self) -> String {
         let charset = "abcdefghijklmnopqrstuvwxyz";
         generate(10, charset)
+    }
+
+    fn delete_db(&self, loc: Self::Location) -> Result<(), anyhow::Error> {
+        fs::remove_file(loc)?;
+        Ok(())
     }
 }
 

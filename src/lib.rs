@@ -12,6 +12,7 @@ pub trait Registry {
     fn create_db(&self) -> Self::Database;
     fn db_location(&self, worker_name: String, random_string: String) -> Result<Self::Location, anyhow::Error>;
     fn write_db(&self, loc: &Self::Location, db: &Self::Database) -> Result<(), anyhow::Error>;
+    fn delete_db(&self, loc: Self::Location) -> Result<(), anyhow::Error>;
     fn read_db(&self, loc: &Self::Location) -> Result<Self::Database, anyhow::Error>;
     fn read_queue(&self, loc: &Self::Location) -> Result<Self::LocalQueue, anyhow::Error>;
     fn create_global_queue(&self) -> Result<Self::GlobalQueueLocation, anyhow::Error>;
@@ -123,7 +124,8 @@ fn run_worker(reg: impl Registry, worker: impl DataCycle) -> Result<(), anyhow::
         reg.ack_global(&mut global_queue, first_merge_rec)?;
         reg.ack_global(&mut global_queue, second_merge_rec)?;
 
-        // delete both old DBs
+        reg.delete_db(first_db_loc).expect("panic here if we can't delete the DB. Otherwise it will be too late to come back to this as we have already acked. No, you cant just not ack until after because then it will retry and the DB will be gone");
+        reg.delete_db(second_db_loc).expect("panic here if we can't delete the DB. Otherwise it will be too late to come back to this as we have already acked. No, you cant just not ack until after because then it will retry and the DB will be gone");
         return Ok(())
     }
 
