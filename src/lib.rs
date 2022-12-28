@@ -217,16 +217,15 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
         // start datacycle
         let cycle = reg.get_data_cycle(local_route.clone());
 
-        if cycle.stop_categorically(&db) { // what does this need again? check written notes?
-            reg.ack_global(&mut global_queue, global_receipt)?;
-            return Ok(());
-        }
-
         let data = cycle
         .get_data(&db, &local_route)
         .context("attempting to get data")?;
 
         cycle.save(&mut db, &data);
+        if cycle.stop_categorically(&db) {
+            reg.ack_global(&mut global_queue, global_receipt)?;
+            return Ok(());
+        }
 
         if cycle.stop_data(&data, &db) {
             reg.ack_global(&mut global_queue, global_receipt)?;
