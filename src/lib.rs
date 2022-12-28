@@ -43,8 +43,8 @@ pub trait Registry {
     fn produce_merge_event(
         &self,
         queue: &mut Self::GlobalQueueLocation,
-        first_db_loc: Self::Location,
-        first_queue_loc: Self::Location,
+        db_loc: Self::Location,
+        queue_loc: Self::Location,
     ) -> Result<Self::JobReceipt, anyhow::Error>;
     fn consume_merge_event(
         &self,
@@ -88,7 +88,7 @@ pub trait DataCycle {
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data>;
     fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool;
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data>;
-    fn save(&self, db: &mut Self::Database, new_data: Self::Data) -> Option<Self::DataRoute>;
+    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute>;
     fn public(&self) -> bool;
 }
 
@@ -208,20 +208,25 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
     let (data_route, global_receipt) = reg.consume_global(&mut global_queue)?;
 
     let mut local_queue = reg.create_local_queue();
-    let queue_to_write = local_queue.clone(); // make sure this is getting written back to
+    let mut queue_to_write = local_queue.clone();
     reg.produce_local(&mut local_queue, data_route.clone());
 
     while let Some(local_route) = reg.consume_local(&mut local_queue) {
+        reg.produce_local(&mut queue_to_write, local_route.clone());
+
         // start datacycle
         let cycle = reg.get_data_cycle(local_route.clone());
-        if cycle.stop_categorically(&db) {
+
+        if cycle.stop_categorically(&db) { // what does this need again? check written notes?
             reg.ack_global(&mut global_queue, global_receipt)?;
             return Ok(());
         }
 
         let data = cycle
-            .get_data(&db, &local_route)
-            .context("attempting to get data")?;
+        .get_data(&db, &local_route)
+        .context("attempting to get data")?;
+
+        cycle.save(&mut db, &data);
 
         if cycle.stop_data(&data, &db) {
             reg.ack_global(&mut global_queue, global_receipt)?;
@@ -237,8 +242,8 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
 
         let results = cycle.search(&data, &friends);
 
-        for result in results { // should this be a for?
-            let res = cycle.save(&mut db, result); // is this the right time to save?
+        for result in results {
+            let res = cycle.save(&mut db, &result);
 
             if res.is_none() {
                 continue;
