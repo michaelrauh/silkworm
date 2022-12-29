@@ -25,10 +25,10 @@ pub trait Registry {
     fn consume_global(
         &self,
         queue: &mut Self::GlobalQueueLocation,
-    ) -> Result<(Self::DataRoute, Self::JobReceipt), anyhow::Error>;
+    ) -> Result<(Self::Data, Self::JobReceipt), anyhow::Error>;
     fn produce_global(
         &self,
-        data: Self::DataRoute,
+        data: Self::Data,
         queue: &mut Self::GlobalQueueLocation,
         priority: usize,
     ) -> Result<Self::JobReceipt, anyhow::Error>;
@@ -75,6 +75,7 @@ pub trait Registry {
         &self,
         route: Self::DataRoute,
     ) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
+    fn cycle_by_data(&self, data: &Self::Data)-> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
 }
 
 pub trait DataCycle {
@@ -205,11 +206,13 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
     let mut db = reg.create_db();
     let db_loc = reg.db_location(name.clone(), random_string)?;
 
-    let (data_route, global_receipt) = reg.consume_global(&mut global_queue)?;
+    let (data, global_receipt) = reg.consume_global(&mut global_queue)?;
 
     let mut local_queue = reg.create_local_queue();
-    let mut queue_to_write = local_queue.clone();
-    reg.produce_local(&mut local_queue, data_route.clone());
+    let mut queue_to_write = reg.create_local_queue();
+    let pre_cycle = reg.cycle_by_data(&data);
+    let pre_route = pre_cycle.save(&mut db, &data).context("saving global to local")?;
+    reg.produce_local(&mut local_queue, pre_route);
 
     while let Some(local_route) = reg.consume_local(&mut local_queue) {
         reg.produce_local(&mut queue_to_write, local_route.clone());
@@ -251,7 +254,7 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
             let res = res.unwrap();
 
             if cycle.public() {
-                reg.produce_global(res, &mut global_queue, 0)?; // concern: what if the data route is referring to a route that is not in the local db? global queue will probably need to expose the data instead of the route
+                reg.produce_global(result, &mut global_queue, 0)?;
             } else {
                 reg.produce_local(&mut local_queue, res);
             }
