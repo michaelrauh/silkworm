@@ -48,7 +48,7 @@ struct GraphData {
     paths: HashMap<i64, GraphPath>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Serialize, Deserialize)]
 enum Data {
     Node(Node),
     Edge(Edge),
@@ -67,7 +67,7 @@ impl DataCycle for Node {
     type DataRoute = DatabaseLocation;
     type Data = Data;
 
-    fn stop_categorically(&self, db: Self::Database) -> bool {
+    fn stop_categorically(&self, db: &Self::Database) -> bool {
         db.edges.is_empty()
     }
 
@@ -101,6 +101,26 @@ impl DataCycle for Node {
             .map(|(_, graph_path)| Data::GraphPath(graph_path.clone()));
         edges.chain(paths).collect_vec()
     }
+
+    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
+        todo!()
+    }
+
+    fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
+        todo!()
+    }
+
+    fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
+        todo!()
+    }
+
+    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+        todo!()
+    }
+
+    fn public(&self) -> bool {
+        todo!()
+    }
 }
 
 impl DataCycle for Edge {
@@ -108,7 +128,7 @@ impl DataCycle for Edge {
     type DataRoute = DatabaseLocation;
     type Data = Data;
 
-    fn stop_categorically(&self, db: Self::Database) -> bool {
+    fn stop_categorically(&self, db: &Self::Database) -> bool {
         db.nodes.is_empty()
     }
 
@@ -144,6 +164,26 @@ impl DataCycle for Edge {
             panic!("edge handler is handling a non edge")
         }
     }
+
+    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
+        todo!()
+    }
+
+    fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
+        todo!()
+    }
+
+    fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
+        todo!()
+    }
+
+    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+        todo!()
+    }
+
+    fn public(&self) -> bool {
+        todo!()
+    }
 }
 
 impl DataCycle for InputFile {
@@ -151,7 +191,7 @@ impl DataCycle for InputFile {
     type DataRoute = DatabaseLocation;
     type Data = Data;
 
-    fn stop_categorically(&self, _db: Self::Database) -> bool {
+    fn stop_categorically(&self, _db: &Self::Database) -> bool {
         false
     }
 
@@ -163,6 +203,26 @@ impl DataCycle for InputFile {
     fn get_friends(&self, _db: &Self::Database, _route: &Self::DataRoute) -> Vec<Self::Data> {
         vec![]
     }
+
+    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
+        todo!()
+    }
+
+    fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
+        todo!()
+    }
+
+    fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
+        todo!()
+    }
+
+    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+        todo!()
+    }
+
+    fn public(&self) -> bool {
+        todo!()
+    }
 }
 
 impl DataCycle for GraphPath {
@@ -170,7 +230,7 @@ impl DataCycle for GraphPath {
     type DataRoute = DatabaseLocation;
     type Data = Data;
 
-    fn stop_categorically(&self, db: Self::Database) -> bool {
+    fn stop_categorically(&self, db: &Self::Database) -> bool {
         db.nodes.is_empty() || db.edges.is_empty()
     }
 
@@ -208,6 +268,26 @@ impl DataCycle for GraphPath {
         } else {
             panic!("path handler is handling a non edge")
         }
+    }
+
+    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
+        todo!()
+    }
+
+    fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
+        todo!()
+    }
+
+    fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
+        todo!()
+    }
+
+    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+        todo!()
+    }
+
+    fn public(&self) -> bool {
+        todo!()
     }
 }
 
@@ -247,8 +327,8 @@ impl Registry for Holder {
 
     fn consume_global(
         &self,
-        mut queue: Self::GlobalQueueLocation,
-    ) -> Result<(Self::DataRoute, Self::JobReceipt), anyhow::Error> {
+        queue: &mut Self::GlobalQueueLocation,
+    ) -> Result<(Self::Data, Self::JobReceipt), anyhow::Error> {
         queue.watch("jobs")?;
 
         let job = queue.reserve()?;
@@ -260,8 +340,8 @@ impl Registry for Holder {
 
     fn produce_global(
         &self,
-        data: Self::DataRoute,
-        mut queue: Self::GlobalQueueLocation,
+        data: Self::Data,
+        queue: &mut Self::GlobalQueueLocation,
         priority: usize,
     ) -> Result<Self::JobReceipt, anyhow::Error> {
         let to_put = bincode::serialize(&data)?;
@@ -464,6 +544,10 @@ impl Registry for Holder {
     fn delete_db(&self, loc: Self::Location) -> Result<(), anyhow::Error> {
         fs::remove_file(loc)?;
         Ok(())
+    }
+
+    fn cycle_by_data(&self, data: &Self::Data)-> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>> {
+        todo!()
     }
 }
 
