@@ -62,6 +62,7 @@ struct DatabaseLocation {
     hash: i64,
 }
 
+// rethink node as an "occupied node". That way paths cannot be complete unless every edge refers to an occupied node
 impl DataCycle for Node {
     type Database = GraphData;
     type DataRoute = DatabaseLocation;
@@ -78,6 +79,9 @@ impl DataCycle for Node {
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
         // todo make this less cloney
+        // todo make it return each edge in the paths as well as edges that overlap the node 
+        // also include any nodes that will be part of any mentioned edge
+        // todo do not return paths
         let data = self
             .get_data(db, route)
             .expect("Do not get friends of nonexistent data");
@@ -102,24 +106,25 @@ impl DataCycle for Node {
         edges.chain(paths).collect_vec()
     }
 
-    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
-        todo!()
+    fn stop_data(&self, _data: &Self::Data, _db: &Self::Database) -> bool {
+        false
     }
 
     fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
-        todo!()
+        friends.is_empty()
     }
 
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
+        // look for paths connected to this node. Collect into new paths. Make sure the new paths only use occupied nodes
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
     fn public(&self) -> bool {
-        todo!()
+        false
     }
 }
 
@@ -177,7 +182,7 @@ impl DataCycle for Edge {
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
@@ -216,7 +221,7 @@ impl DataCycle for InputFile {
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
@@ -282,7 +287,7 @@ impl DataCycle for GraphPath {
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute> {
+    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 

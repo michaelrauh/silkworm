@@ -89,7 +89,7 @@ pub trait DataCycle {
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data>;
     fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool;
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data>;
-    fn save(&self, db: &mut Self::Database, new_data: &Self::Data) -> Option<Self::DataRoute>;
+    fn save(&self, db: &mut Self::Database, new_data: Vec<&Self::Data>) -> Vec<Option<Self::DataRoute>>;
     fn public(&self) -> bool;
 }
 
@@ -211,8 +211,16 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
     let mut local_queue = reg.create_local_queue();
     let mut queue_to_write = reg.create_local_queue();
     let pre_cycle = reg.cycle_by_data(&data);
-    let pre_route = pre_cycle.save(&mut db, &data).context("saving global to local")?;
-    reg.produce_local(&mut local_queue, pre_route);
+    let pre_routes = pre_cycle.save(&mut db, vec![&data]);
+    for pre_route in pre_routes {
+        if pre_route.is_none() {
+            continue;
+        }
+
+        let pre_route = pre_route.unwrap();
+        reg.produce_local(&mut local_queue, pre_route);
+    }
+    
 
     while let Some(local_route) = reg.consume_local(&mut local_queue) {
         reg.produce_local(&mut queue_to_write, local_route.clone());
@@ -224,7 +232,7 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
         .get_data(&db, &local_route)
         .context("attempting to get data")?;
 
-        cycle.save(&mut db, &data);
+        cycle.save(&mut db, vec![&data]);
         if cycle.stop_categorically(&db) {
             reg.ack_global(&mut global_queue, global_receipt)?;
             return Ok(());
@@ -244,19 +252,19 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
 
         let results = cycle.search(&data, &friends);
 
-        for result in results {
-            let res = cycle.save(&mut db, &result);
-
-            if res.is_none() {
+        let to_pass = results.iter().collect();
+        let res = cycle.save(&mut db, to_pass);
+        for (search_result, search_location) in results.into_iter().zip(res) {
+            if search_location.is_none() {
                 continue;
             }
 
-            let res = res.unwrap();
+            let search_location = search_location.unwrap();
 
             if cycle.public() {
-                reg.produce_global(result, &mut global_queue, 0)?;
+                reg.produce_global(search_result, &mut global_queue, 0)?;
             } else {
-                reg.produce_local(&mut local_queue, res);
+                reg.produce_local(&mut local_queue, search_location);
             }
         }
     }
