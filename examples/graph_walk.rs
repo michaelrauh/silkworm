@@ -62,7 +62,6 @@ struct DatabaseLocation {
     hash: i64,
 }
 
-// rethink node as an "occupied node". That way paths cannot be complete unless every edge refers to an occupied node
 impl DataCycle for Node {
     type Database = GraphData;
     type DataRoute = DatabaseLocation;
@@ -78,32 +77,57 @@ impl DataCycle for Node {
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
-        // todo make this less cloney
-        // todo make it return each edge in the paths as well as edges that overlap the node 
-        // also include any nodes that will be part of any mentioned edge
-        // todo do not return paths
+        // beginning
+          // missing node on the left - ox : xxxxxxx
+          // missing node on the right - xo : xxxxxx
+        // end 
+          // missing node on the left - xxxxx : ox
+          // missing node on the right - xxxxx : xo
         let data = self
             .get_data(db, route)
             .expect("Do not get friends of nonexistent data");
-        let edges = db
-            .edges
-            .iter()
-            .filter(|(_, inner_edge)| {
-                Data::Node(inner_edge.from.clone()) == data
-                    || Data::Node(inner_edge.to.clone()) == data
-            })
-            .map(|(_, edge)| Data::Edge(edge.clone()));
-        let paths = db
-            .paths
-            .iter()
-            .filter(|(_, graph_path)| {
-                graph_path.edges.iter().any(|inner_edge| {
-                    Data::Node(inner_edge.from.clone()) == data
-                        || Data::Node(inner_edge.to.clone()) == data
-                })
-            })
-            .map(|(_, graph_path)| Data::GraphPath(graph_path.clone()));
-        edges.chain(paths).collect_vec()
+
+        let missing_node;
+        if let Data::Node(node) = data {
+            missing_node = node;
+        } else {
+            panic!("route in data cycle must point to a node")
+        }
+
+        let missing_node_on_left_edges = db.edges.iter().filter(|(_, inner_edge)| missing_node == inner_edge.from).map(|(_, inner_edge)| inner_edge).cloned();
+        let missing_node_on_right_edges = db.edges.iter().filter(|(_, inner_edge)| missing_node == inner_edge.to).map(|(_, inner_edge)| inner_edge).cloned();
+
+        let packaged_beginning_missing_node_on_left_paths = db
+        .paths
+        .iter()
+        .filter(|(_, graph_path)| {
+            missing_node_on_left_edges.clone().any(|inner_edge| inner_edge.to == graph_path.edges.first().expect("dont have empty paths").from)
+            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+        
+        let packaged_beginning_missing_node_on_right_paths = db
+        .paths
+        .iter()
+        .filter(|(_, graph_path)| {
+            missing_node == graph_path.edges.first().expect("dont have empty paths").from
+            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+        
+        let packaged_ending_missing_node_on_left_paths = db
+        .paths
+        .iter()
+        .filter(|(_, graph_path)| {
+            missing_node == graph_path.edges.last().expect("dont have empty paths").to
+            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+
+        let packaged_ending_missing_node_on_right_paths = db
+        .paths
+        .iter()
+        .filter(|(_, graph_path)| {
+            missing_node_on_right_edges.clone().any(|inner_edge| inner_edge.from == graph_path.edges.last().expect("dont have empty paths").to)
+            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+
+        let packaged_missing_node_on_left_edges = missing_node_on_left_edges.clone().map(|edge| Data::Edge(edge));
+        let packaged_missing_node_on_right_edges = missing_node_on_right_edges.clone().map(|edge| Data::Edge(edge));
+        packaged_missing_node_on_left_edges.chain(packaged_missing_node_on_right_edges).chain(packaged_beginning_missing_node_on_left_paths).chain(packaged_beginning_missing_node_on_right_paths).chain(packaged_ending_missing_node_on_left_paths).chain(packaged_ending_missing_node_on_right_paths).collect_vec()
     }
 
     fn stop_data(&self, _data: &Self::Data, _db: &Self::Database) -> bool {
@@ -245,6 +269,7 @@ impl DataCycle for GraphPath {
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
+        // todo make sure this reflects only occupied nodes and edges. That is, edges that connect occupied nodes.
         let data = self
             .get_data(db, route)
             .expect("Do not get friends of nonexistent data");
