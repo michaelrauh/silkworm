@@ -44,10 +44,10 @@ struct Edge {
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
 struct GraphData {
-    nodes: HashMap<i64, Node>,
-    edges: HashMap<i64, Edge>,
-    input_files: HashMap<i64, InputFile>,
-    paths: HashMap<i64, GraphPath>,
+    nodes: HashMap<u64, Node>,
+    edges: HashMap<u64, Edge>,
+    input_files: HashMap<u64, InputFile>,
+    paths: HashMap<u64, GraphPath>,
 }
 
 #[derive(PartialEq, Serialize, Deserialize)]
@@ -61,7 +61,7 @@ enum Data {
 #[derive(PartialEq, Eq, Serialize, Deserialize, Default, Clone)]
 struct DatabaseLocation {
     data_type: String,
-    hash: i64,
+    hash: u64,
 }
 
 impl DataCycle for Node {
@@ -279,7 +279,25 @@ impl DataCycle for Node {
         db: &mut Self::Database,
         new_data: Vec<&Data>,
     ) -> Vec<std::option::Option<DatabaseLocation>> {
-        todo!()
+        new_data.into_iter().map(|datum| {
+            let data;
+            if let Data::GraphPath(path) = datum {
+                data = path;
+            } else {
+                panic!("node should only be saving paths")
+            }
+
+            let mut hasher = DefaultHasher::new();
+            data.hash(&mut hasher);
+            let hash = hasher.finish();
+
+            let existed = db.paths.insert(hash, data.to_owned());
+
+            match existed {
+                Some(_) => None,
+                None => Some(DatabaseLocation { data_type: "paths".to_string(), hash }),
+            }
+        }).collect_vec()
     }
 
     fn public(&self) -> bool {
