@@ -75,7 +75,10 @@ pub trait Registry {
         &self,
         route: Self::DataRoute,
     ) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
-    fn cycle_by_data(&self, data: &Self::Data)-> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
+    fn cycle_by_data(
+        &self,
+        data: &Self::Data,
+    ) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>;
 }
 
 pub trait DataCycle {
@@ -89,7 +92,11 @@ pub trait DataCycle {
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data>;
     fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool;
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data>;
-    fn save(&self, db: &mut Self::Database, new_data: Vec<&Self::Data>) -> Vec<Option<Self::DataRoute>>;
+    fn save(
+        &self,
+        db: &mut Self::Database,
+        new_data: Vec<&Self::Data>,
+    ) -> Vec<Option<Self::DataRoute>>;
     fn public(&self) -> bool;
 }
 
@@ -220,7 +227,6 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
         let pre_route = pre_route.unwrap();
         reg.produce_local(&mut local_queue, pre_route);
     }
-    
 
     while let Some(local_route) = reg.consume_local(&mut local_queue) {
         reg.produce_local(&mut queue_to_write, local_route.clone());
@@ -229,8 +235,8 @@ pub fn run_worker(reg: impl Registry) -> Result<(), anyhow::Error> {
         let cycle = reg.get_data_cycle(local_route.clone());
 
         let data = cycle
-        .get_data(&db, &local_route)
-        .context("attempting to get data")?;
+            .get_data(&db, &local_route)
+            .context("attempting to get data")?;
 
         cycle.save(&mut db, vec![&data]);
         if cycle.stop_categorically(&db) {

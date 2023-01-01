@@ -5,9 +5,12 @@ use random_string::generate;
 use serde::{Deserialize, Serialize};
 use silkworm::{run_worker, DataCycle, Registry};
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::io::Write;
+use std::iter::once;
 use std::time::Duration;
 use std::{process, vec};
 
@@ -30,7 +33,6 @@ struct InputFile {
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct GraphPath {
-    _label: String,
     edges: Vec<Edge>,
 }
 
@@ -77,12 +79,15 @@ impl DataCycle for Node {
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
+        // paths are inhabited and so do not need to be checked
+        // edges may not be inhabited, so the non-missing node must be checked to be an edge eligible for path inclusion
+
         // beginning
-          // missing node on the left - ox : xxxxxxx
-          // missing node on the right - xo : xxxxxx
-        // end 
-          // missing node on the left - xxxxx : ox
-          // missing node on the right - xxxxx : xo
+        // missing node on the left - ox : xxxxxxx
+        // missing node on the right - xo : xxxxxx
+        // end
+        // missing node on the left - xxxxx : ox
+        // missing node on the right - xxxxx : xo
         let data = self
             .get_data(db, route)
             .expect("Do not get friends of nonexistent data");
@@ -94,40 +99,91 @@ impl DataCycle for Node {
             panic!("route in data cycle must point to a node")
         }
 
-        let missing_node_on_left_edges = db.edges.iter().filter(|(_, inner_edge)| missing_node == inner_edge.from).map(|(_, inner_edge)| inner_edge).cloned();
-        let missing_node_on_right_edges = db.edges.iter().filter(|(_, inner_edge)| missing_node == inner_edge.to).map(|(_, inner_edge)| inner_edge).cloned();
+        let missing_node_on_left_edges = db
+            .edges
+            .iter()
+            .filter(|(_, inner_edge)| {
+                missing_node == inner_edge.from && db.nodes.values().contains(&inner_edge.to)
+            })
+            .map(|(_, inner_edge)| inner_edge)
+            .cloned();
+        let missing_node_on_right_edges = db
+            .edges
+            .iter()
+            .filter(|(_, inner_edge)| {
+                missing_node == inner_edge.to && db.nodes.values().contains(&inner_edge.from)
+            })
+            .map(|(_, inner_edge)| inner_edge)
+            .cloned();
 
         let packaged_beginning_missing_node_on_left_paths = db
-        .paths
-        .iter()
-        .filter(|(_, graph_path)| {
-            missing_node_on_left_edges.clone().any(|inner_edge| inner_edge.to == graph_path.edges.first().expect("dont have empty paths").from)
-            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
-        
+            .paths
+            .iter()
+            .filter(|(_, graph_path)| {
+                missing_node_on_left_edges.clone().any(|inner_edge| {
+                    inner_edge.to
+                        == graph_path
+                            .edges
+                            .first()
+                            .expect("dont have empty paths")
+                            .from
+                })
+            })
+            .map(|(_, inner_graph_path)| inner_graph_path)
+            .cloned()
+            .map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+
         let packaged_beginning_missing_node_on_right_paths = db
-        .paths
-        .iter()
-        .filter(|(_, graph_path)| {
-            missing_node == graph_path.edges.first().expect("dont have empty paths").from
-            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
-        
+            .paths
+            .iter()
+            .filter(|(_, graph_path)| {
+                missing_node
+                    == graph_path
+                        .edges
+                        .first()
+                        .expect("dont have empty paths")
+                        .from
+            })
+            .map(|(_, inner_graph_path)| inner_graph_path)
+            .cloned()
+            .map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+
         let packaged_ending_missing_node_on_left_paths = db
-        .paths
-        .iter()
-        .filter(|(_, graph_path)| {
-            missing_node == graph_path.edges.last().expect("dont have empty paths").to
-            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+            .paths
+            .iter()
+            .filter(|(_, graph_path)| {
+                missing_node == graph_path.edges.last().expect("dont have empty paths").to
+            })
+            .map(|(_, inner_graph_path)| inner_graph_path)
+            .cloned()
+            .map(|inner_graph_path| Data::GraphPath(inner_graph_path));
 
         let packaged_ending_missing_node_on_right_paths = db
-        .paths
-        .iter()
-        .filter(|(_, graph_path)| {
-            missing_node_on_right_edges.clone().any(|inner_edge| inner_edge.from == graph_path.edges.last().expect("dont have empty paths").to)
-            }).map(|(_, inner_graph_path)| inner_graph_path).cloned().map(|inner_graph_path| Data::GraphPath(inner_graph_path));
+            .paths
+            .iter()
+            .filter(|(_, graph_path)| {
+                missing_node_on_right_edges.clone().any(|inner_edge| {
+                    inner_edge.from == graph_path.edges.last().expect("dont have empty paths").to
+                })
+            })
+            .map(|(_, inner_graph_path)| inner_graph_path)
+            .cloned()
+            .map(|inner_graph_path| Data::GraphPath(inner_graph_path));
 
-        let packaged_missing_node_on_left_edges = missing_node_on_left_edges.clone().map(|edge| Data::Edge(edge));
-        let packaged_missing_node_on_right_edges = missing_node_on_right_edges.clone().map(|edge| Data::Edge(edge));
-        packaged_missing_node_on_left_edges.chain(packaged_missing_node_on_right_edges).chain(packaged_beginning_missing_node_on_left_paths).chain(packaged_beginning_missing_node_on_right_paths).chain(packaged_ending_missing_node_on_left_paths).chain(packaged_ending_missing_node_on_right_paths).collect_vec()
+        let packaged_missing_node_on_left_edges = missing_node_on_left_edges
+            .clone()
+            .map(|edge| Data::Edge(edge));
+        let packaged_missing_node_on_right_edges = missing_node_on_right_edges
+            .clone()
+            .map(|edge| Data::Edge(edge));
+
+        packaged_missing_node_on_left_edges
+            .chain(packaged_missing_node_on_right_edges)
+            .chain(packaged_beginning_missing_node_on_left_paths)
+            .chain(packaged_beginning_missing_node_on_right_paths)
+            .chain(packaged_ending_missing_node_on_left_paths)
+            .chain(packaged_ending_missing_node_on_right_paths)
+            .collect_vec()
     }
 
     fn stop_data(&self, _data: &Self::Data, _db: &Self::Database) -> bool {
@@ -140,10 +196,89 @@ impl DataCycle for Node {
 
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
         // look for paths connected to this node. Collect into new paths. Make sure the new paths only use occupied nodes
-        todo!()
+
+        // two edges
+        // missing node in the middle of two edges - xo : ox
+        // beginning
+        // missing node on the left - ox : xxxxxxx
+        // missing node on the right - xo : xxxxxx
+        // end
+        // missing node on the left - xxxxx : ox
+        // missing node on the right - xxxxx : xo
+
+        let missing_node;
+        if let Data::Node(node) = data {
+            missing_node = node;
+        } else {
+            panic!("route in data cycle must point to a node")
+        }
+
+        let mut paths: Vec<&GraphPath> = vec![];
+        let mut left_edges: Vec<&Edge> = vec![];
+        let mut right_edges: Vec<&Edge> = vec![];
+        for friend in friends {
+            match friend {
+                Data::Node(_) => panic!("nodes are not friends with nodes"),
+                Data::Edge(edge) => {
+                    if &edge.from == missing_node {
+                        left_edges.push(edge);
+                    } else {
+                        right_edges.push(edge);
+                    }
+                }
+                Data::InputFile(_) => panic!("nodes are not friends with input files"),
+                Data::GraphPath(path) => paths.push(path),
+            }
+        }
+
+        let new_minimal_path = right_edges
+            .iter()
+            .cartesian_product(left_edges.clone())
+            .map(|(re, le)| {
+                Data::GraphPath(GraphPath {
+                    edges: vec![re.to_owned().to_owned(), le.to_owned()],
+                })
+            });
+
+        let beginning = left_edges
+            .iter()
+            .chain(&right_edges)
+            .cartesian_product(paths.clone())
+            .filter(|(inner_edge, inner_path)| {
+                inner_edge.to == inner_path.edges.first().expect("nonempty path").from
+            })
+            .map(|(inner_edge, inner_path)| {
+                Data::GraphPath(GraphPath {
+                    edges: once(inner_edge.to_owned())
+                        .chain(inner_path.edges.iter())
+                        .cloned()
+                        .collect_vec(),
+                })
+            });
+
+        let end = left_edges
+        .iter()
+        .chain(&right_edges)
+        .cartesian_product(paths)
+        .filter(|(inner_edge, inner_path)| {
+            inner_edge.from == inner_path.edges.last().expect("nonempty path").from
+        })
+        .map(|(inner_edge, inner_path)| {
+            Data::GraphPath(GraphPath {
+                edges: inner_path.edges.iter().chain(once(inner_edge.to_owned())) 
+                    .cloned()
+                    .collect_vec(),
+            })
+        });
+
+        new_minimal_path.chain(beginning).chain(end).collect_vec()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
+    fn save(
+        &self,
+        db: &mut Self::Database,
+        new_data: Vec<&Data>,
+    ) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
@@ -206,7 +341,11 @@ impl DataCycle for Edge {
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
+    fn save(
+        &self,
+        db: &mut Self::Database,
+        new_data: Vec<&Data>,
+    ) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
@@ -245,7 +384,11 @@ impl DataCycle for InputFile {
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
+    fn save(
+        &self,
+        db: &mut Self::Database,
+        new_data: Vec<&Data>,
+    ) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
@@ -312,7 +455,11 @@ impl DataCycle for GraphPath {
         todo!()
     }
 
-    fn save(&self, db: &mut Self::Database, new_data: Vec<&Data>) -> Vec<std::option::Option<DatabaseLocation>> {
+    fn save(
+        &self,
+        db: &mut Self::Database,
+        new_data: Vec<&Data>,
+    ) -> Vec<std::option::Option<DatabaseLocation>> {
         todo!()
     }
 
@@ -576,7 +723,11 @@ impl Registry for Holder {
         Ok(())
     }
 
-    fn cycle_by_data(&self, data: &Self::Data)-> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>> {
+    fn cycle_by_data(
+        &self,
+        data: &Self::Data,
+    ) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>
+    {
         todo!()
     }
 }
