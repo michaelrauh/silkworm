@@ -74,8 +74,7 @@ impl DataCycle for Node {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        let node = db.nodes.get(&route.hash)?;
-        Some(Data::Node(node.to_owned()))
+        db.nodes.get(&route.hash).map(|node| Data::Node(node.to_owned()))
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
@@ -315,8 +314,7 @@ impl DataCycle for Edge {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        let edge = db.edges.get(&route.hash)?;
-        Some(Data::Edge(edge.to_owned()))
+        db.edges.get(&route.hash).map(|edge| Data::Edge(edge.to_owned()))
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
@@ -382,8 +380,7 @@ impl DataCycle for InputFile {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        let input_file = db.input_files.get(&route.hash)?;
-        Some(Data::InputFile(input_file.to_owned()))
+        db.input_files.get(&route.hash).map(|input_file| Data::InputFile(input_file.to_owned()))
     }
 
     fn get_friends(&self, _db: &Self::Database, _route: &Self::DataRoute) -> Vec<Self::Data> {
@@ -425,8 +422,7 @@ impl DataCycle for GraphPath {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        let graph_path = db.paths.get(&route.hash)?;
-        Some(Data::GraphPath(graph_path.to_owned()))
+        db.paths.get(&route.hash).map(|graph_path| Data::GraphPath(graph_path.to_owned()))
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
