@@ -23,12 +23,12 @@ fn main() {
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct Node {
-    _label: String,
+    label: String,
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
 struct InputFile {
-    _label: String,
+    contents: String,
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Default, Clone)]
@@ -549,16 +549,48 @@ impl DataCycle for InputFile {
         vec![]
     }
 
-    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
-        todo!()
+    fn stop_data(&self, _data: &Self::Data, _db: &Self::Database) -> bool {
+        false
     }
 
-    fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
-        todo!()
+    fn stop_friends(&self, _friends: &Vec<Self::Data>) -> bool {
+        false
     }
 
-    fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
-        todo!()
+    fn search(&self, data: &Self::Data, _friends: &Vec<Self::Data>) -> Vec<Self::Data> {
+        let input_file;
+        if let Data::InputFile(file) = data {
+            input_file = file;
+        } else {
+            panic!("route in data cycle must point to an input file")
+        };
+
+        let (nodes, edges) = input_file
+            .contents
+            .split("--")
+            .collect_tuple()
+            .expect("file must be formatted nodes -- edges");
+
+        let new_nodes = nodes.split("\n").map(|label| {
+            Data::Node(Node {
+                label: label.to_string(),
+            })
+        });
+        let new_edges = edges.split("\n").map(|edge| {
+            let (first, second) = edge
+                .split("->")
+                .collect_tuple()
+                .expect("nodes must be formatted like label1->label2");
+            Data::Edge(Edge {
+                from: Node {
+                    label: first.to_owned(),
+                },
+                to: Node {
+                    label: second.to_owned(),
+                },
+            })
+        });
+        new_nodes.chain(new_edges).collect_vec()
     }
 
     fn save(
