@@ -415,7 +415,82 @@ impl DataCycle for Edge {
     }
 
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
-        todo!()
+        // edge : edge
+        // to left
+        // to right
+
+        // edge : path
+        // path : edge
+        let missing_edge;
+        if let Data::Edge(edge) = data {
+            missing_edge = edge;
+        } else {
+            panic!("route in data cycle must point to an edge")
+        };
+
+        let right_node = missing_edge.to.clone();
+
+        let mut left_paths: Vec<&GraphPath> = vec![];
+        let mut right_paths: Vec<&GraphPath> = vec![];
+        let mut left_edges: Vec<&Edge> = vec![];
+        let mut right_edges: Vec<&Edge> = vec![];
+        for friend in friends {
+            match friend {
+                Data::Node(_) => panic!("edges are not friends with nodes"),
+                Data::Edge(edge) => {
+                    if edge.from == right_node {
+                        left_edges.push(edge);
+                    } else {
+                        // if edge.to == left node
+                        right_edges.push(edge);
+                    }
+                }
+                Data::InputFile(_) => panic!("edges are not friends with input files"),
+                Data::GraphPath(path) => {
+                    if path.edges.first().expect("nonempty").from == right_node {
+                        left_paths.push(path);
+                    } else {
+                        // if path.last.to == left node
+                        right_paths.push(path);
+                    }
+                }
+            }
+        }
+
+        let edge_friend_then_missing = right_edges.iter().map(|inner_edge| {
+            Data::GraphPath(GraphPath {
+                edges: vec![inner_edge.to_owned().to_owned(), missing_edge.to_owned()],
+            })
+        });
+        let missing_then_edge_friend = left_edges.iter().map(|inner_edge| {
+            Data::GraphPath(GraphPath {
+                edges: vec![missing_edge.to_owned(), inner_edge.to_owned().to_owned()],
+            })
+        });
+
+        let path_friend_then_missing = right_paths.iter().map(|inner_path| {
+            Data::GraphPath(GraphPath {
+                edges: inner_path
+                    .edges
+                    .iter()
+                    .cloned()
+                    .chain(once(missing_edge.clone()))
+                    .collect_vec(),
+            })
+        });
+        let missing_then_path_friend = left_paths.iter().map(|inner_path| {
+            Data::GraphPath(GraphPath {
+                edges: once(missing_edge.clone())
+                    .chain(inner_path.edges.iter().cloned())
+                    .collect_vec(),
+            })
+        });
+
+        edge_friend_then_missing
+            .chain(missing_then_edge_friend)
+            .chain(path_friend_then_missing)
+            .chain(missing_then_path_friend)
+            .collect_vec()
     }
 
     fn save(
