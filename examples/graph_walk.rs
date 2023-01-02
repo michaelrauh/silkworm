@@ -4,8 +4,8 @@ use itertools::Itertools;
 use random_string::generate;
 use serde::{Deserialize, Serialize};
 use silkworm::{run_worker, DataCycle, Registry};
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -74,7 +74,9 @@ impl DataCycle for Node {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        db.nodes.get(&route.hash).map(|node| Data::Node(node.to_owned()))
+        db.nodes
+            .get(&route.hash)
+            .map(|node| Data::Node(node.to_owned()))
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
@@ -256,19 +258,22 @@ impl DataCycle for Node {
             });
 
         let end = left_edges
-        .iter()
-        .chain(&right_edges)
-        .cartesian_product(paths)
-        .filter(|(inner_edge, inner_path)| {
-            inner_edge.from == inner_path.edges.last().expect("nonempty path").from
-        })
-        .map(|(inner_edge, inner_path)| {
-            Data::GraphPath(GraphPath {
-                edges: inner_path.edges.iter().chain(once(inner_edge.to_owned())) 
-                    .cloned()
-                    .collect_vec(),
+            .iter()
+            .chain(&right_edges)
+            .cartesian_product(paths)
+            .filter(|(inner_edge, inner_path)| {
+                inner_edge.from == inner_path.edges.last().expect("nonempty path").from
             })
-        });
+            .map(|(inner_edge, inner_path)| {
+                Data::GraphPath(GraphPath {
+                    edges: inner_path
+                        .edges
+                        .iter()
+                        .chain(once(inner_edge.to_owned()))
+                        .cloned()
+                        .collect_vec(),
+                })
+            });
 
         new_minimal_path.chain(beginning).chain(end).collect_vec()
     }
@@ -278,25 +283,31 @@ impl DataCycle for Node {
         db: &mut Self::Database,
         new_data: Vec<&Data>,
     ) -> Vec<std::option::Option<DatabaseLocation>> {
-        new_data.into_iter().map(|datum| {
-            let data;
-            if let Data::GraphPath(path) = datum {
-                data = path;
-            } else {
-                panic!("node should only be saving paths")
-            }
+        new_data
+            .into_iter()
+            .map(|datum| {
+                let data;
+                if let Data::GraphPath(path) = datum {
+                    data = path;
+                } else {
+                    panic!("node should only be saving paths")
+                }
 
-            let mut hasher = DefaultHasher::new();
-            data.hash(&mut hasher);
-            let hash = hasher.finish();
+                let mut hasher = DefaultHasher::new();
+                data.hash(&mut hasher);
+                let hash = hasher.finish();
 
-            let existed = db.paths.insert(hash, data.to_owned());
+                let existed = db.paths.insert(hash, data.to_owned());
 
-            match existed {
-                Some(_) => None,
-                None => Some(DatabaseLocation { data_type: "paths".to_string(), hash }),
-            }
-        }).collect_vec()
+                match existed {
+                    Some(_) => None,
+                    None => Some(DatabaseLocation {
+                        data_type: "paths".to_string(),
+                        hash,
+                    }),
+                }
+            })
+            .collect_vec()
     }
 
     fn public(&self) -> bool {
@@ -314,43 +325,93 @@ impl DataCycle for Edge {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        db.edges.get(&route.hash).map(|edge| Data::Edge(edge.to_owned()))
+        db.edges
+            .get(&route.hash)
+            .map(|edge| Data::Edge(edge.to_owned()))
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
+        // All edges must be inhabited to be friends
+        // edge : edge
+        // to left
+        // to right
+
+        // edge : path
+        // path : edge
+
         let data = self
             .get_data(db, route)
             .expect("Do not get friends of nonexistent data");
+
+        let missing_edge;
         if let Data::Edge(edge) = data {
-            let nodes = db
-                .nodes
-                .iter()
-                .filter(|(_, node)| {
-                    node.clone().clone() == edge.from || node.clone().clone() == edge.to
-                })
-                .map(|(_, node)| Data::Node(node.clone()));
-            let paths = db
-                .paths
-                .iter()
-                .filter(|(_, graph_path)| {
-                    graph_path
-                        .edges
-                        .iter()
-                        .any(|inner_edge| inner_edge.clone() == edge)
-                })
-                .map(|(_, graph_path)| Data::GraphPath(graph_path.clone()));
-            nodes.chain(paths).collect_vec()
+            missing_edge = edge;
         } else {
-            panic!("edge handler is handling a non edge")
-        }
+            panic!("route in data cycle must point to an edge")
+        };
+
+        let left_node = missing_edge.from;
+        let right_node = missing_edge.to;
+
+        let edges_to_left = db
+            .edges
+            .iter()
+            .filter(|(_, inner_edge)| inner_edge.to == left_node)
+            .filter(|(_, inner_edge)| db.nodes.values().contains(&inner_edge.from))
+            .map(|(_, inner_edge)| inner_edge)
+            .cloned()
+            .map(|inner_edge| Data::Edge(inner_edge));
+
+        let edges_to_right = db
+            .edges
+            .iter()
+            .filter(|(_, inner_edge)| inner_edge.from == right_node)
+            .filter(|(_, inner_edge)| db.nodes.values().contains(&inner_edge.to))
+            .map(|(_, inner_edge)| inner_edge)
+            .cloned()
+            .map(|inner_edge| Data::Edge(inner_edge));
+
+        let paths_to_right = db
+            .paths
+            .iter()
+            .filter(|(_, inner_path)| {
+                inner_path.edges.first().expect("nonempty path").from == right_node
+            })
+            .map(|(_, inner_path)| inner_path)
+            .cloned()
+            .map(|inner_path| Data::GraphPath(inner_path));
+
+        let paths_to_left = db
+            .paths
+            .iter()
+            .filter(|(_, inner_path)| {
+                inner_path.edges.last().expect("nonempty path").to == left_node
+            })
+            .map(|(_, inner_path)| inner_path)
+            .cloned()
+            .map(|inner_path| Data::GraphPath(inner_path));
+
+        edges_to_left
+            .chain(edges_to_right)
+            .chain(paths_to_right)
+            .chain(paths_to_left)
+            .collect_vec()
     }
 
     fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
-        todo!()
+        let missing_edge;
+        if let Data::Edge(edge) = data {
+            missing_edge = edge;
+        } else {
+            panic!("route in data cycle must point to an edge")
+        };
+
+        !(db.nodes.values().contains(&missing_edge.from)
+            && db.nodes.values().contains(&missing_edge.to))
     }
 
     fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
-        todo!()
+        friends.is_empty()
     }
 
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
@@ -380,7 +441,9 @@ impl DataCycle for InputFile {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        db.input_files.get(&route.hash).map(|input_file| Data::InputFile(input_file.to_owned()))
+        db.input_files
+            .get(&route.hash)
+            .map(|input_file| Data::InputFile(input_file.to_owned()))
     }
 
     fn get_friends(&self, _db: &Self::Database, _route: &Self::DataRoute) -> Vec<Self::Data> {
@@ -422,7 +485,9 @@ impl DataCycle for GraphPath {
     }
 
     fn get_data(&self, db: &Self::Database, route: &Self::DataRoute) -> Option<Self::Data> {
-        db.paths.get(&route.hash).map(|graph_path| Data::GraphPath(graph_path.to_owned()))
+        db.paths
+            .get(&route.hash)
+            .map(|graph_path| Data::GraphPath(graph_path.to_owned()))
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
