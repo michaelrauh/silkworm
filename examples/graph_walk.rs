@@ -598,11 +598,51 @@ impl DataCycle for InputFile {
         db: &mut Self::Database,
         new_data: Vec<&Data>,
     ) -> Vec<std::option::Option<DatabaseLocation>> {
-        todo!()
+        new_data
+        .into_iter()
+        .map(|datum| {
+            match datum {
+                Data::Node(node) => {
+                    let mut hasher = DefaultHasher::new();
+                    node.hash(&mut hasher);
+                    let hash = hasher.finish();
+        
+                    let existed = db.nodes.insert(hash, node.to_owned()); 
+                    
+                    match existed {
+                        Some(_) => None,
+                        None => Some(DatabaseLocation {
+                            data_type: "nodes".to_string(),
+                            hash,
+                        }),
+                    }
+                },
+                Data::Edge(edge) => {
+                    let mut hasher = DefaultHasher::new();
+                    edge.hash(&mut hasher);
+                    let hash = hasher.finish();
+        
+                    let existed = db.edges.insert(hash, edge.to_owned());   
+                    
+                    match existed {
+                        Some(_) => None,
+                        None => Some(DatabaseLocation {
+                            data_type: "edges".to_string(),
+                            hash,
+                        }),
+                    }
+                },
+                Data::InputFile(_) => panic!("input file does not produce input files"),
+                Data::GraphPath(_) => panic!("input file does not produce graph paths"),
+            }
+        })
+        .collect_vec();
+
+        vec![]
     }
 
     fn public(&self) -> bool {
-        todo!()
+        true
     }
 }
 
