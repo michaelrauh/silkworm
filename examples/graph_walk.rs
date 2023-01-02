@@ -662,35 +662,12 @@ impl DataCycle for GraphPath {
     }
 
     fn get_friends(&self, db: &Self::Database, route: &Self::DataRoute) -> Vec<Self::Data> {
-        // todo make sure this reflects only occupied nodes and edges. That is, edges that connect occupied nodes.
-        let data = self
-            .get_data(db, route)
-            .expect("Do not get friends of nonexistent data");
+        // this path : other path
+        // other path : this path
+        // edge : this path
+        // this path : edge
 
-        if let Data::GraphPath(graph_path) = data {
-            let nodes = db
-                .nodes
-                .iter()
-                .filter(|(_, node)| {
-                    graph_path.edges.iter().any(|edge| {
-                        edge.from == node.clone().clone() || edge.to == node.clone().clone()
-                    })
-                })
-                .map(|(_, node)| Data::Node(node.clone()));
-            let edges = db
-                .edges
-                .iter()
-                .filter(|(_, edge)| {
-                    graph_path
-                        .edges
-                        .iter()
-                        .any(|inner_edge| inner_edge == edge.clone())
-                })
-                .map(|(_, edge)| Data::Edge(edge.clone()));
-            nodes.chain(edges).collect_vec()
-        } else {
-            panic!("path handler is handling a non edge")
-        }
+        todo!()
     }
 
     fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
@@ -978,7 +955,12 @@ impl Registry for Holder {
         data: &Self::Data,
     ) -> Box<dyn DataCycle<Database = Self::Database, DataRoute = Self::DataRoute, Data = Self::Data>>
     {
-        todo!()
+        match data {
+            Data::Node(_) => Box::new(Node::default()),
+            Data::Edge(_) => Box::new(Edge::default()),
+            Data::InputFile(_) => Box::new(InputFile::default()),
+            Data::GraphPath(_) => Box::new(GraphPath::default()),
+        }
     }
 }
 
