@@ -498,11 +498,35 @@ impl DataCycle for Edge {
         db: &mut Self::Database,
         new_data: Vec<&Data>,
     ) -> Vec<std::option::Option<DatabaseLocation>> {
-        todo!()
+        new_data
+            .into_iter()
+            .map(|datum| {
+                let data;
+                if let Data::GraphPath(path) = datum {
+                    data = path;
+                } else {
+                    panic!("edge should only be saving paths")
+                }
+
+                let mut hasher = DefaultHasher::new();
+                data.hash(&mut hasher);
+                let hash = hasher.finish();
+
+                let existed = db.paths.insert(hash, data.to_owned());
+
+                match existed {
+                    Some(_) => None,
+                    None => Some(DatabaseLocation {
+                        data_type: "paths".to_string(),
+                        hash,
+                    }),
+                }
+            })
+            .collect_vec()
     }
 
     fn public(&self) -> bool {
-        todo!()
+        false
     }
 }
 
