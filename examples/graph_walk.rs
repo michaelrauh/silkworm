@@ -599,16 +599,15 @@ impl DataCycle for InputFile {
         new_data: Vec<&Data>,
     ) -> Vec<std::option::Option<DatabaseLocation>> {
         new_data
-        .into_iter()
-        .map(|datum| {
-            match datum {
+            .into_iter()
+            .map(|datum| match datum {
                 Data::Node(node) => {
                     let mut hasher = DefaultHasher::new();
                     node.hash(&mut hasher);
                     let hash = hasher.finish();
-        
-                    let existed = db.nodes.insert(hash, node.to_owned()); 
-                    
+
+                    let existed = db.nodes.insert(hash, node.to_owned());
+
                     match existed {
                         Some(_) => None,
                         None => Some(DatabaseLocation {
@@ -616,14 +615,14 @@ impl DataCycle for InputFile {
                             hash,
                         }),
                     }
-                },
+                }
                 Data::Edge(edge) => {
                     let mut hasher = DefaultHasher::new();
                     edge.hash(&mut hasher);
                     let hash = hasher.finish();
-        
-                    let existed = db.edges.insert(hash, edge.to_owned());   
-                    
+
+                    let existed = db.edges.insert(hash, edge.to_owned());
+
                     match existed {
                         Some(_) => None,
                         None => Some(DatabaseLocation {
@@ -631,14 +630,11 @@ impl DataCycle for InputFile {
                             hash,
                         }),
                     }
-                },
+                }
                 Data::InputFile(_) => panic!("input file does not produce input files"),
                 Data::GraphPath(_) => panic!("input file does not produce graph paths"),
-            }
-        })
-        .collect_vec();
-
-        vec![]
+            })
+            .collect_vec()
     }
 
     fn public(&self) -> bool {
@@ -666,20 +662,149 @@ impl DataCycle for GraphPath {
         // other path : this path
         // edge : this path
         // this path : edge
+        let data = self
+            .get_data(db, route)
+            .expect("Do not get friends of nonexistent data");
 
-        todo!()
+        let missing_graph;
+        if let Data::GraphPath(graph) = data {
+            missing_graph = graph;
+        } else {
+            panic!("route in data cycle must point to a graph")
+        };
+
+        let start_node = missing_graph
+            .edges
+            .first()
+            .expect("nonempty")
+            .from
+            .to_owned();
+        let end_node = missing_graph.edges.last().expect("nonempty").to.to_owned();
+
+        let this_then_friend = db
+            .paths
+            .values()
+            .filter(|friend| friend.edges.last().expect("nonempty").to == start_node)
+            .map(|friend| Data::GraphPath(friend.clone()));
+        let friend_then_this = db
+            .paths
+            .values()
+            .filter(|friend| friend.edges.first().expect("nonempty").from == end_node)
+            .map(|friend| Data::GraphPath(friend.clone()));
+
+        let edge_then_path = db
+            .edges
+            .values()
+            .filter(|friend| friend.to == start_node && db.nodes.values().contains(&friend.from))
+            .map(|friend| Data::Edge(friend.clone()));
+        let path_then_edge = db
+            .edges
+            .values()
+            .filter(|friend| friend.to == start_node && db.nodes.values().contains(&friend.to))
+            .map(|friend| Data::Edge(friend.clone()));
+        this_then_friend
+            .chain(friend_then_this)
+            .chain(edge_then_path)
+            .chain(path_then_edge)
+            .collect_vec()
     }
 
-    fn stop_data(&self, data: &Self::Data, db: &Self::Database) -> bool {
-        todo!()
+    fn stop_data(&self, _data: &Self::Data, _db: &Self::Database) -> bool {
+        false
     }
 
-    fn stop_friends(&self, friends: &Vec<Self::Data>) -> bool {
-        todo!()
+    fn stop_friends(&self, _friends: &Vec<Self::Data>) -> bool {
+        false
     }
 
     fn search(&self, data: &Self::Data, friends: &Vec<Self::Data>) -> Vec<Self::Data> {
-        todo!()
+        // this path : other path
+        // other path : this path
+        // edge : this path
+        // this path : edge
+
+        let missing_path;
+        if let Data::GraphPath(path) = data {
+            missing_path = path;
+        } else {
+            panic!("route in data cycle must point to a path")
+        };
+
+        let right_node = missing_path.edges.last().expect("nonempty").to.clone();
+
+        let mut left_paths: Vec<&GraphPath> = vec![];
+        let mut right_paths: Vec<&GraphPath> = vec![];
+        let mut left_edges: Vec<&Edge> = vec![];
+        let mut right_edges: Vec<&Edge> = vec![];
+        for friend in friends {
+            match friend {
+                Data::Node(_) => panic!("paths are not friends with nodes"),
+                Data::Edge(edge) => {
+                    if edge.from == right_node {
+                        left_edges.push(edge);
+                    } else {
+                        // if edge.to == left node
+                        right_edges.push(edge);
+                    }
+                }
+                Data::InputFile(_) => panic!("paths are not friends with input files"),
+                Data::GraphPath(path) => {
+                    if path.edges.first().expect("nonempty").from == right_node {
+                        left_paths.push(path);
+                    } else {
+                        // if path.last.to == left node
+                        right_paths.push(path);
+                    }
+                }
+            }
+        }
+
+        let this_then_friend = right_paths.iter().map(|friend| {
+            Data::GraphPath(GraphPath {
+                edges: missing_path
+                    .edges
+                    .iter()
+                    .chain(friend.edges.iter())
+                    .cloned()
+                    .collect_vec(),
+            })
+        });
+        let friend_then_this = left_paths.iter().map(|friend| {
+            Data::GraphPath(GraphPath {
+                edges: friend
+                    .edges
+                    .iter()
+                    .chain(missing_path.edges.iter())
+                    .cloned()
+                    .collect_vec(),
+            })
+        });
+
+        let this_then_edge = right_edges.iter().map(|friend| {
+            Data::GraphPath(GraphPath {
+                edges: missing_path
+                    .edges
+                    .iter()
+                    .chain(once(friend.clone()))
+                    .cloned()
+                    .collect_vec(),
+            })
+        });
+
+        let edge_then_this = left_edges.iter().map(|friend| {
+            Data::GraphPath(GraphPath {
+                edges: once(friend.clone())
+                    .chain(missing_path.edges.iter())
+                    .cloned()
+                    .collect_vec(),
+            })
+        });
+
+        this_then_friend
+            .chain(friend_then_this)
+            .chain(this_then_edge)
+            .chain(edge_then_this)
+            .collect_vec()
     }
 
     fn save(
@@ -687,11 +812,33 @@ impl DataCycle for GraphPath {
         db: &mut Self::Database,
         new_data: Vec<&Data>,
     ) -> Vec<std::option::Option<DatabaseLocation>> {
-        todo!()
+        new_data
+            .into_iter()
+            .map(|datum| match datum {
+                Data::Node(_) => panic!("graph path does not produce nodes"),
+                Data::GraphPath(path) => {
+                    let mut hasher = DefaultHasher::new();
+                    path.hash(&mut hasher);
+                    let hash = hasher.finish();
+
+                    let existed = db.paths.insert(hash, path.to_owned());
+
+                    match existed {
+                        Some(_) => None,
+                        None => Some(DatabaseLocation {
+                            data_type: "paths".to_string(),
+                            hash,
+                        }),
+                    }
+                }
+                Data::InputFile(_) => panic!("graph path does not produce input files"),
+                Data::Edge(_) => panic!("graph path does not produce edges"),
+            })
+            .collect_vec()
     }
 
     fn public(&self) -> bool {
-        todo!()
+        false
     }
 }
 
